@@ -1,5 +1,7 @@
 import datetime
+import html
 import logging
+import re
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -43,6 +45,43 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
+class ValidateRequest(BaseModel):
+    query: str
+
+
+class ValidateResponse(BaseModel):
+    status: str
+    sanitized_query: str | None = None
+    reason: str | None = None
+
+
+# Regular expression and string rules matching the ADK workflow logic
+PATTERNS = [
+    "ignore previous",
+    "ignore above",
+    "disregard",
+    "you are now",
+    "system prompt",
+    "reveal your",
+    "-- ",
+    "/*",
+    "xp_cmdshell",
+    "UNION SELECT",
+    "OR 1=1",
+]
+
+BLOCKED_KEYWORDS = {
+    "DROP",
+    "DELETE",
+    "UPDATE",
+    "INSERT",
+    "ALTER",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+}
+
+
 @app.get("/health")
 def health():
     """Health check endpoint."""
@@ -53,6 +92,62 @@ def health():
 def get_audit_log():
     """Audit log endpoint."""
     return audit_log
+
+
+@app.post("/validate", response_model=ValidateResponse)
+def validate_query(req: ValidateRequest):
+    """Directly scans input query for security patterns and SQL mutations without ADK runner."""
+    query = req.query
+    query_lower = query.lower()
+
+    # 1. Injection detection
+    detected_patterns = []
+    for pattern in PATTERNS:
+        if pattern.lower() in query_lower:
+            detected_patterns.append(pattern)
+
+    if detected_patterns:
+        reason = f"Prompt injection pattern(s) detected: {', '.join(detected_patterns)}"
+        result = {"status": "blocked", "reason": reason}
+        audit_log.append(
+            {
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "query": query,
+                "result": result,
+            }
+        )
+        return ValidateResponse(status="blocked", reason=reason)
+
+    # 2. SQL keyword scanning
+    query_upper = query.upper()
+    detected_keywords = []
+    for kw in BLOCKED_KEYWORDS:
+        if re.search(r"\b" + re.escape(kw) + r"\b", query_upper):
+            detected_keywords.append(kw)
+
+    if detected_keywords:
+        reason = f"SQL mutation keyword(s) detected: {', '.join(detected_keywords)}"
+        result = {"status": "blocked", "reason": reason}
+        audit_log.append(
+            {
+                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                "query": query,
+                "result": result,
+            }
+        )
+        return ValidateResponse(status="blocked", reason=reason)
+
+    # 3. Escaping HTML/XSS elements
+    sanitized = html.escape(query)
+    result = {"status": "safe", "sanitized_query": sanitized}
+    audit_log.append(
+        {
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "query": query,
+            "result": result,
+        }
+    )
+    return ValidateResponse(status="safe", sanitized_query=sanitized)
 
 
 @app.post("/chat")
