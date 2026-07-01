@@ -60,6 +60,8 @@ class SqlEngineState(BaseModel):
     generated_sql: str | None = None
     retry_count: int = 0
     correction_message: str | None = None
+    schema_context_output: dict | None = None
+    sql_generator_output: dict | None = None
 
 
 class SchemaContextOutput(BaseModel):
