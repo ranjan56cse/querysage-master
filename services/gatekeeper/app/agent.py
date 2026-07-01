@@ -63,7 +63,7 @@ def injection_detector(ctx: Context, node_input: str) -> Event:
     query_lower = node_input.lower()
     detected = []
     for pattern in patterns:
-        if pattern in query_lower:
+        if pattern.lower() in query_lower:
             detected.append(pattern)
 
     if detected:
@@ -113,10 +113,13 @@ def sql_keyword_scanner(ctx: Context, node_input: str) -> Event:
 @node
 def pass_node(ctx: Context, node_input: str) -> Event:
     """Returns safe output status with sanitized query."""
+    import html
+
+    sanitized = html.escape(node_input)
     return Event(
-        output={"status": "safe", "sanitized_input": node_input},
+        output={"status": "safe", "sanitized_input": sanitized},
         actions=EventActions(
-            state_delta={"status": "safe", "sanitized_input": node_input}
+            state_delta={"status": "safe", "sanitized_input": sanitized}
         ),
     )
 
