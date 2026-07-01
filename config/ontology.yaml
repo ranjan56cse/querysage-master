@@ -1,0 +1,7 @@
+business_rules:
+  fiscal_year_start: "April"
+  revenue_metric: "gross_sales_amount - discount_amount"
+  active_customer_definition: "A customer who has placed at least one order in the last 90 days."
+  active_customer_filter: "last_order_date >= CURRENT_DATE - INTERVAL '90 days'"
+  product_margin_metric: "selling_price - cost_price"
+  growth_calculation: "(current_value - previous_value) / previous_value"

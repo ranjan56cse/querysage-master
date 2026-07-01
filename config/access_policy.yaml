@@ -1,0 +1,13 @@
+access_policy:
+  allowed_tables:
+    - "customers"
+    - "orders"
+    - "order_items"
+    - "products"
+    - "categories"
+    
+  blocked_columns:
+    - "customers.password_hash"
+    - "customers.ssn"
+    - "customers.credit_card_number"
+    - "orders.payment_transaction_id"

@@ -1,0 +1,60 @@
+examples:
+  - id: 1
+    natural_language: "Show me total revenue for each month in the current fiscal year."
+    sql: |
+      SELECT 
+        DATE_TRUNC('month', o.order_date) AS order_month,
+        SUM(o.gross_sales_amount - o.discount_amount) AS monthly_revenue
+      FROM orders AS o
+      WHERE o.order_date >= '2026-04-01' -- Fiscal year start
+      GROUP BY 1
+      ORDER BY 1 ASC;
+
+  - id: 2
+    natural_language: "Who are the top 5 active customers by total spend?"
+    sql: |
+      SELECT 
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        SUM(o.gross_sales_amount - o.discount_amount) AS total_spend
+      FROM customers AS c
+      JOIN orders AS o ON c.customer_id = o.customer_id
+      WHERE c.last_order_date >= CURRENT_DATE - INTERVAL '90 days' -- Active definition
+      GROUP BY 1, 2, 3
+      ORDER BY total_spend DESC
+      LIMIT 5;
+
+  - id: 3
+    natural_language: "Which product categories generate the highest profit margins?"
+    sql: |
+      SELECT 
+        p.category,
+        AVG((p.selling_price - p.cost_price) / p.selling_price) AS avg_margin
+      FROM products AS p
+      GROUP BY 1
+      ORDER BY avg_margin DESC;
+
+  - id: 4
+    natural_language: "Find the total quantity of items sold for category 'Electronics'."
+    sql: |
+      SELECT 
+        p.product_name,
+        SUM(oi.quantity) AS total_quantity_sold
+      FROM order_items AS oi
+      JOIN products AS p ON oi.product_id = p.product_id
+      WHERE p.category = 'Electronics'
+      GROUP BY 1
+      ORDER BY total_quantity_sold DESC;
+
+  - id: 5
+    natural_language: "List orders that received a discount larger than 20% of their gross value."
+    sql: |
+      SELECT 
+        o.order_id,
+        o.customer_id,
+        o.gross_sales_amount,
+        o.discount_amount
+      FROM orders AS o
+      WHERE o.discount_amount > (0.20 * o.gross_sales_amount)
+      ORDER BY o.discount_amount DESC;
