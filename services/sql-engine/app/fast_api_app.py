@@ -26,14 +26,14 @@ app.add_middleware(
 
 
 class GenerateRequest(BaseModel):
-    user_query: str
+    query: str
     schema_hint: str | None = None
     session_id: str | None = None
     user_id: str | None = None
 
 
 class GenerateResponse(BaseModel):
-    generated_sql: str
+    sql_query: str
     enriched_context: str
     tables_used: list[str]
 
@@ -41,7 +41,7 @@ class GenerateResponse(BaseModel):
 @app.get("/health")
 def health():
     """Health check endpoint."""
-    return {"status": "ok", "service": "sql-engine"}
+    return {"status": "ok", "service": "sql_engine"}
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -58,12 +58,12 @@ async def generate(req: GenerateRequest):
     )
 
     new_message = types.Content(
-        role="user", parts=[types.Part.from_text(text=req.user_query)]
+        role="user", parts=[types.Part.from_text(text=req.query)]
     )
 
     # Supply custom inputs in initial state_delta
     state_delta = {
-        "user_query": req.user_query,
+        "user_query": req.query,
         "schema_hint": req.schema_hint or "",
         "retry_count": 0,
     }
@@ -105,7 +105,7 @@ async def generate(req: GenerateRequest):
         )
 
     return GenerateResponse(
-        generated_sql=final_output.get("generated_sql", ""),
+        sql_query=final_output.get("generated_sql", ""),
         enriched_context=final_output.get("enriched_context", ""),
         tables_used=final_output.get("tables_used", []),
     )
