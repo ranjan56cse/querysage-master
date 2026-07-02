@@ -1,10 +1,13 @@
+# ruff: noqa: E402
 import logging
 import os
 
 from dotenv import load_dotenv
 
 # Load .env from both service root and app/ directory
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+)
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
@@ -68,6 +71,7 @@ async def generate(req: GenerateRequest):
 
     if session is None:
         import uuid
+
         session_id = f"sql-{uuid.uuid4().hex[:8]}"
         await session_svc.create_session(
             app_name="app", user_id=user_id, session_id=session_id

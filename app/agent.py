@@ -1,10 +1,13 @@
+# ruff: noqa: E402
 import logging
 import os
 from typing import Any
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+)
 load_dotenv()
 
 import httpx

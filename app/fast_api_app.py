@@ -1,9 +1,12 @@
+# ruff: noqa: E402
 import logging
 import os
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+)
 load_dotenv()
 
 import httpx
@@ -100,7 +103,9 @@ async def chat(req: ChatRequest):
                         gk_data = resp.json()
                         if gk_data.get("status") == "blocked":
                             gatekeeper_blocked = True
-                            gatekeeper_reason = gk_data.get("reason", "Query blocked by security policy.")
+                            gatekeeper_reason = gk_data.get(
+                                "reason", "Query blocked by security policy."
+                            )
                         else:
                             sanitized_query = gk_data.get(
                                 "sanitized_query", req.user_query
