@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 import logging
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,9 @@ from app.agent import memory_service, session_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+# ADK 2.0 HITL function call name used by RequestInput
+REQUEST_INPUT_FC_NAME = "adk_request_input"
 
 # Initialize FastAPI App
 app = FastAPI(title="QuerySage API Server")
@@ -48,6 +52,8 @@ class ChatResponse(BaseModel):
     interrupt_id: str | None = None
     message: str | None = None
     session_id: str
+    sql_results: list[dict[str, Any]] | None = None
+    chart_type: str | None = None
 
 
 @app.get("/health")
@@ -56,12 +62,33 @@ def health():
     return {"status": "ok", "service": "querysage-master"}
 
 
+def _find_pending_interrupt(session) -> str | None:
+    """Find an unresolved adk_request_input function call in session events."""
+    if not session or not session.events:
+        return None
+
+    fc_ids: set[str] = set()
+    fr_ids: set[str] = set()
+    for event in session.events:
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                if (
+                    part.function_call
+                    and part.function_call.name == REQUEST_INPUT_FC_NAME
+                ):
+                    fc_ids.add(part.function_call.id)
+                if part.function_response and part.function_response.id:
+                    fr_ids.add(part.function_response.id)
+
+    pending = fc_ids - fr_ids
+    return next(iter(pending)) if pending else None
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     """Processes natural language questions, executing the QuerySage ADK workflow."""
 
-    # 1. Ensure session exists, then check if suspended for resume
-    invocation_id = None
+    # 1. Ensure session exists
     try:
         session = await session_service.get_session(
             app_name="app", user_id=req.user_id, session_id=req.session_id
@@ -75,17 +102,30 @@ async def chat(req: ChatRequest):
         )
         logging.info(f"Created new session: {req.session_id}")
 
-    if session and session.events:
-        last_event = session.events[-1]
-        if last_event.interrupted:
-            invocation_id = last_event.invocation_id
-            logging.info(
-                f"Resuming suspended workflow for session {req.session_id} with invocation {invocation_id}"
-            )
+    # 2. Check if this is a resume (session has a pending HITL interrupt)
+    pending_interrupt_id = _find_pending_interrupt(session)
 
-    # 2. If it's a new turn, pre-run Gatekeeper and SQL Engine
     state_delta = None
-    if not invocation_id:
+    if pending_interrupt_id:
+        # Resume: send a FunctionResponse matching the pending FC
+        logging.info(
+            f"Resuming HITL interrupt_id={pending_interrupt_id}, "
+            f"user response={req.user_query}"
+        )
+        new_message = types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id=pending_interrupt_id,
+                        name=REQUEST_INPUT_FC_NAME,
+                        response={"result": req.user_query},
+                    )
+                )
+            ],
+        )
+    else:
+        # New query: pre-call Gatekeeper and SQL Engine
         gatekeeper_url = os.environ.get("GATEKEEPER_SERVICE_URL")
         sql_engine_url = os.environ.get("SQL_ENGINE_SERVICE_URL")
 
@@ -143,6 +183,9 @@ async def chat(req: ChatRequest):
             "sanitized_query": sanitized_query,
             "sql_query": sql_query,
         }
+        new_message = types.Content(
+            role="user", parts=[types.Part.from_text(text=req.user_query)]
+        )
 
     # 3. Drive the ADK workflow via the Runner
     runner = Runner(
@@ -151,16 +194,11 @@ async def chat(req: ChatRequest):
         memory_service=memory_service,
     )
 
-    new_message = types.Content(
-        role="user", parts=[types.Part.from_text(text=req.user_query)]
-    )
-
     events = []
     try:
         async for event in runner.run_async(
             user_id=req.user_id,
             session_id=req.session_id,
-            invocation_id=invocation_id,
             new_message=new_message,
             state_delta=state_delta,
         ):
@@ -169,30 +207,26 @@ async def chat(req: ChatRequest):
         logging.error(f"Error during ADK workflow execution: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
-    # 4. Check for interrupts or final outputs
+    # 4. Check for HITL interrupts (adk_request_input FCs) or final outputs
     final_output = ""
     interrupted = False
     interrupt_id = None
     interrupt_msg = None
 
     for event in events:
-        if event.interrupted:
-            interrupted = True
-            # Find RequestInput details
-            if event.content and event.content.parts:
-                interrupt_msg = "".join(p.text for p in event.content.parts if p.text)
-            # Find RequestInput details from custom_metadata or actions
-            if event.actions and event.actions.render_ui_widgets:
-                for widget in event.actions.render_ui_widgets:
-                    if hasattr(widget, "interrupt_id"):
-                        interrupt_id = widget.interrupt_id
-            # Fallback values
-            if not interrupt_id:
-                interrupt_id = "approved"
-            if not interrupt_msg:
-                interrupt_msg = (
-                    "Neon SQL Execution request. Do you approve execution? (yes/no)"
-                )
+        # Detect adk_request_input function calls — the ADK 2.0 HITL mechanism
+        if event.content and event.content.parts:
+            for part in event.content.parts:
+                if (
+                    part.function_call
+                    and part.function_call.name == REQUEST_INPUT_FC_NAME
+                ):
+                    interrupted = True
+                    interrupt_id = part.function_call.id
+                    args = part.function_call.args or {}
+                    interrupt_msg = args.get(
+                        "message", "Approval required. Do you approve? (yes/no)"
+                    )
 
         if event.output is not None:
             final_output = str(event.output)
@@ -206,6 +240,25 @@ async def chat(req: ChatRequest):
             session_id=req.session_id,
         )
 
+    # 5. Extract structured results from session state for charts
+    sql_results = None
+    chart_type = None
+    try:
+        updated_session = await session_service.get_session(
+            app_name="app", user_id=req.user_id, session_id=req.session_id
+        )
+        if updated_session and updated_session.state:
+            executor_output = updated_session.state.get("executor_output", {})
+            if isinstance(executor_output, dict):
+                sql_results = executor_output.get("sql_results")
+                chart_type = executor_output.get("chart_type", "table")
+    except Exception as e:
+        logging.warning(f"Could not extract structured results: {e}")
+
     return ChatResponse(
-        status="success", output=final_output, session_id=req.session_id
+        status="success",
+        output=final_output,
+        session_id=req.session_id,
+        sql_results=sql_results,
+        chart_type=chart_type,
     )

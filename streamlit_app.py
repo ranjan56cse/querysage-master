@@ -1,6 +1,9 @@
 import uuid
 
 import httpx
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 # Set page config
@@ -47,13 +50,6 @@ st.markdown(
         margin-bottom: 1rem;
         border-left: 4px solid #4f46e5;
     }
-    .assistant-msg {
-        background-color: #111827;
-        padding: 1rem;
-        border-radius: 12px;
-        margin-bottom: 1rem;
-        border-left: 4px solid #a855f7;
-    }
     .warning-msg {
         background-color: #450a0a;
         padding: 1rem;
@@ -67,13 +63,6 @@ st.markdown(
         border-radius: 12px;
         border: 2px dashed #f59e0b;
         margin: 1rem 0;
-    }
-    .metric-badge {
-        background-color: #312e81;
-        padding: 0.2rem 0.6rem;
-        border-radius: 6px;
-        font-size: 0.85rem;
-        color: #c7d2fe;
     }
 </style>
 """,
@@ -98,7 +87,8 @@ with st.sidebar:
         '<div class="sidebar-title">🔮 QuerySage Control</div>', unsafe_allow_html=True
     )
     st.markdown(
-        "QuerySage uses Google ADK 2.0 graph workflow orchestration to secure, translate, and analyze e-commerce analytics queries."
+        "QuerySage uses Google ADK 2.0 graph workflow orchestration to secure, "
+        "translate, and analyze e-commerce analytics queries."
     )
 
     st.divider()
@@ -123,7 +113,6 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🔌 Connected Services")
-    # Health checks indicator
     services_list = {
         "Orchestrator (Port 8000)": "http://localhost:8000/health",
         "Gatekeeper (Port 9000)": "http://localhost:9000/health",
@@ -146,9 +135,80 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<div class="subtitle">Secure natural-language to PostgreSQL translator with human-in-the-loop validation and visual insights.</div>',
+    '<div class="subtitle">Secure natural-language to PostgreSQL translator with '
+    "human-in-the-loop validation and visual insights.</div>",
     unsafe_allow_html=True,
 )
+
+
+def render_chart(sql_results: list[dict], chart_type: str):
+    """Render a Plotly chart from structured SQL results."""
+    if not sql_results:
+        return
+    df = pd.DataFrame(sql_results)
+    if df.empty:
+        return
+
+    cols = list(df.columns)
+    x_col = cols[0]
+    y_col = cols[1] if len(cols) > 1 else None
+
+    ct = chart_type.lower().strip() if chart_type else "table"
+
+    if ct == "bar" and y_col:
+        fig = px.bar(
+            df,
+            x=x_col,
+            y=y_col,
+            title=f"{x_col.replace('_', ' ').title()} vs {y_col.replace('_', ' ').title()}",
+            template="plotly_dark",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    elif ct == "line" and y_col:
+        fig = px.line(
+            df,
+            x=x_col,
+            y=y_col,
+            title=f"{x_col.replace('_', ' ').title()} Trend",
+            template="plotly_dark",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    elif ct == "pie" and y_col:
+        fig = px.pie(
+            df,
+            names=x_col,
+            values=y_col,
+            title=f"{x_col.replace('_', ' ').title()} Distribution",
+            template="plotly_dark",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # Table display
+        fig = go.Figure(
+            data=[
+                go.Table(
+                    header={
+                        "values": cols,
+                        "fill_color": "#312e81",
+                        "font": {"color": "white"},
+                        "align": "left",
+                    },
+                    cells={
+                        "values": [df[c].tolist() for c in cols],
+                        "fill_color": "#1e1b4b",
+                        "font": {"color": "#e6e8f0"},
+                        "align": "left",
+                    },
+                )
+            ]
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
 
 # Render Chat History
 for message in st.session_state.messages:
@@ -160,22 +220,26 @@ for message in st.session_state.messages:
     elif message["role"] == "assistant":
         if message.get("status") == "blocked":
             st.markdown(
-                f'<div class="warning-msg"><b>⚠️ Security Block:</b><br>{message["content"]}</div>',
+                f'<div class="warning-msg"><b>⚠️ Security Block:</b><br>'
+                f'{message["content"]}</div>',
                 unsafe_allow_html=True,
             )
+        elif message.get("status") == "interrupted":
+            st.warning(f"⏸️ **HITL Approval Requested**\n\n{message['content']}")
         else:
-            st.markdown(
-                f'<div class="assistant-msg"><b>🤖 Assistant:</b><br>{message["content"]}</div>',
-                unsafe_allow_html=True,
-            )
+            # Render markdown output (tables, insights, etc.)
+            st.markdown(message["content"])
+
+            # Render chart if structured data is present
+            if message.get("sql_results"):
+                render_chart(message["sql_results"], message.get("chart_type", "table"))
 
 
 # Helper function to submit query
 def submit_query(query_text: str):
-    # Add User message
+    """Send query to master orchestrator and handle the response."""
     st.session_state.messages.append({"role": "user", "content": query_text})
 
-    # Show loading status and call API
     with st.spinner("Executing ADK orchestrator workflow..."):
         try:
             payload = {
@@ -197,6 +261,8 @@ def submit_query(query_text: str):
                                 "output", "No response content returned."
                             ),
                             "status": "success",
+                            "sql_results": data.get("sql_results"),
+                            "chart_type": data.get("chart_type"),
                         }
                     )
                     st.session_state.awaiting_approval = False
@@ -205,12 +271,12 @@ def submit_query(query_text: str):
                 elif status == "interrupted":
                     st.session_state.awaiting_approval = True
                     st.session_state.interrupted_sql = data.get(
-                        "message", "RequestInput Approval Required"
+                        "message", "Approval required"
                     )
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
-                            "content": f"**Execution paused for Human-in-the-Loop review:**\n\n```sql\n{st.session_state.interrupted_sql}\n```",
+                            "content": st.session_state.interrupted_sql,
                             "status": "interrupted",
                         }
                     )
@@ -227,7 +293,7 @@ def submit_query(query_text: str):
                     st.session_state.interrupted_sql = ""
             else:
                 st.error(
-                    f"Error calling orchestrator endpoint: {resp.status_code} - {resp.text}"
+                    f"Error calling orchestrator: {resp.status_code} - {resp.text}"
                 )
         except Exception as e:
             st.error(f"Failed to connect to Orchestrator service: {e}")
@@ -237,7 +303,8 @@ def submit_query(query_text: str):
 if st.session_state.awaiting_approval:
     st.markdown('<div class="approval-card">', unsafe_allow_html=True)
     st.warning(
-        "🚨 A transaction is waiting for your explicit approval. Do you approve executing the SQL statement above?"
+        "🚨 A SQL query is waiting for your explicit approval before execution. "
+        "Review the query above and decide."
     )
 
     col1, col2 = st.columns(2)
