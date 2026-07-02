@@ -1,60 +1,63 @@
 examples:
   - id: 1
-    natural_language: "Show me total revenue for each month in the current fiscal year."
+    natural_language: "Show me total revenue by region."
     sql: |
-      SELECT 
-        DATE_TRUNC('month', o.order_date) AS order_month,
-        SUM(o.gross_sales_amount - o.discount_amount) AS monthly_revenue
+      SELECT
+        r.region_name,
+        SUM(o.total_revenue) AS total_revenue
       FROM orders AS o
-      WHERE o.order_date >= '2026-04-01' -- Fiscal year start
-      GROUP BY 1
-      ORDER BY 1 ASC;
+      JOIN regions AS r ON o.region_id = r.region_id
+      GROUP BY r.region_name
+      ORDER BY total_revenue DESC;
 
   - id: 2
-    natural_language: "Who are the top 5 active customers by total spend?"
+    natural_language: "Who are the top 5 sales reps by revenue this year?"
     sql: |
-      SELECT 
-        c.customer_id,
-        c.first_name,
-        c.last_name,
-        SUM(o.gross_sales_amount - o.discount_amount) AS total_spend
-      FROM customers AS c
-      JOIN orders AS o ON c.customer_id = o.customer_id
-      WHERE c.last_order_date >= CURRENT_DATE - INTERVAL '90 days' -- Active definition
-      GROUP BY 1, 2, 3
-      ORDER BY total_spend DESC
+      SELECT
+        sr.rep_name,
+        SUM(srp.revenue) AS total_revenue
+      FROM sales_rep_performance AS srp
+      JOIN sales_reps AS sr ON srp.rep_id = sr.rep_id
+      WHERE srp.year = EXTRACT(YEAR FROM CURRENT_DATE)
+      GROUP BY sr.rep_name
+      ORDER BY total_revenue DESC
       LIMIT 5;
 
   - id: 3
-    natural_language: "Which product categories generate the highest profit margins?"
+    natural_language: "Which product categories generate the most revenue?"
     sql: |
-      SELECT 
-        p.category,
-        AVG((p.selling_price - p.cost_price) / p.selling_price) AS avg_margin
-      FROM products AS p
-      GROUP BY 1
-      ORDER BY avg_margin DESC;
-
-  - id: 4
-    natural_language: "Find the total quantity of items sold for category 'Electronics'."
-    sql: |
-      SELECT 
-        p.product_name,
-        SUM(oi.quantity) AS total_quantity_sold
+      SELECT
+        c.category_name,
+        SUM(oi.line_revenue) AS total_revenue
       FROM order_items AS oi
       JOIN products AS p ON oi.product_id = p.product_id
-      WHERE p.category = 'Electronics'
-      GROUP BY 1
-      ORDER BY total_quantity_sold DESC;
+      JOIN categories AS c ON p.category_id = c.category_id
+      GROUP BY c.category_name
+      ORDER BY total_revenue DESC;
+
+  - id: 4
+    natural_language: "Show monthly sales trend for the current year."
+    sql: |
+      SELECT
+        ms.month,
+        SUM(ms.revenue) AS monthly_revenue,
+        SUM(ms.units_sold) AS total_units
+      FROM monthly_sales AS ms
+      WHERE ms.year = EXTRACT(YEAR FROM CURRENT_DATE)
+      GROUP BY ms.month
+      ORDER BY ms.month ASC;
 
   - id: 5
-    natural_language: "List orders that received a discount larger than 20% of their gross value."
+    natural_language: "Find customers at risk of churning."
     sql: |
-      SELECT 
-        o.order_id,
-        o.customer_id,
-        o.gross_sales_amount,
-        o.discount_amount
-      FROM orders AS o
-      WHERE o.discount_amount > (0.20 * o.gross_sales_amount)
-      ORDER BY o.discount_amount DESC;
+      SELECT
+        ch.customer_name,
+        ch.segment,
+        ch.nps_score,
+        ch.renewal_probability,
+        ch.last_order_date
+      FROM customer_health AS ch
+      WHERE ch.churn_flag = TRUE
+         OR ch.last_order_date < CURRENT_DATE - INTERVAL '180 days'
+      ORDER BY ch.renewal_probability ASC
+      LIMIT 20;

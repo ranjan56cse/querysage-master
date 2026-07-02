@@ -1,13 +1,21 @@
 access_policy:
   allowed_tables:
-    - "customers"
+    - "regions"
+    - "categories"
+    - "products"
+    - "sales_reps"
+    - "sales_rep_performance"
+    - "sales_targets"
+    - "monthly_sales"
     - "orders"
     - "order_items"
-    - "products"
-    - "categories"
-    
+    - "customer_health"
+    - "agent_query_log"
+    - "suggested_questions"
+    - "correlation_registry"
+
   blocked_columns:
-    - "customers.password_hash"
-    - "customers.ssn"
-    - "customers.credit_card_number"
-    - "orders.payment_transaction_id"
+    - "customer_health.renewal_probability"
+    - "agent_query_log.session_id"
+
+  max_rows: 1000

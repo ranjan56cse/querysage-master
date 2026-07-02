@@ -1,4 +1,11 @@
 import logging
+import os
+
+from dotenv import load_dotenv
+
+# Load .env from both service root and app/ directory
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,10 +57,27 @@ async def generate(req: GenerateRequest):
     session_id = req.session_id or "default-sql-session"
     user_id = req.user_id or "default-user"
 
-    # 1. Drive the ADK workflow via the Runner
+    # 1. Ensure session exists
+    session_svc = services.get_session_service()
+    try:
+        session = await session_svc.get_session(
+            app_name="app", user_id=user_id, session_id=session_id
+        )
+    except Exception:
+        session = None
+
+    if session is None:
+        import uuid
+        session_id = f"sql-{uuid.uuid4().hex[:8]}"
+        await session_svc.create_session(
+            app_name="app", user_id=user_id, session_id=session_id
+        )
+        logging.info(f"Created new SQL Engine session: {session_id}")
+
+    # 2. Drive the ADK workflow via the Runner
     runner = Runner(
         app=adk_app,
-        session_service=services.get_session_service(),
+        session_service=session_svc,
         artifact_service=services.get_artifact_service(),
     )
 

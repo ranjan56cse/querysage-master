@@ -1,6 +1,11 @@
 import logging
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv()
+
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,21 +57,28 @@ def health():
 async def chat(req: ChatRequest):
     """Processes natural language questions, executing the QuerySage ADK workflow."""
 
-    # 1. Check if the session is currently suspended to resume it
+    # 1. Ensure session exists, then check if suspended for resume
     invocation_id = None
     try:
         session = await session_service.get_session(
             app_name="app", user_id=req.user_id, session_id=req.session_id
         )
-        if session and session.events:
-            last_event = session.events[-1]
-            if last_event.interrupted:
-                invocation_id = last_event.invocation_id
-                logging.info(
-                    f"Resuming suspended workflow for session {req.session_id} with invocation {invocation_id}"
-                )
-    except Exception as e:
-        logging.warning(f"Could not retrieve session status: {e}")
+    except Exception:
+        session = None
+
+    if session is None:
+        session = await session_service.create_session(
+            app_name="app", user_id=req.user_id, session_id=req.session_id
+        )
+        logging.info(f"Created new session: {req.session_id}")
+
+    if session and session.events:
+        last_event = session.events[-1]
+        if last_event.interrupted:
+            invocation_id = last_event.invocation_id
+            logging.info(
+                f"Resuming suspended workflow for session {req.session_id} with invocation {invocation_id}"
+            )
 
     # 2. If it's a new turn, pre-run Gatekeeper and SQL Engine
     state_delta = None
@@ -76,20 +88,35 @@ async def chat(req: ChatRequest):
 
         # Call Gatekeeper
         sanitized_query = req.user_query
+        gatekeeper_blocked = False
+        gatekeeper_reason = None
         if gatekeeper_url and "YOUR_GATEKEEPER_SERVICE_URL" not in gatekeeper_url:
             try:
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
-                        gatekeeper_url, json={"query": req.user_query}, timeout=5.0
+                        gatekeeper_url, json={"query": req.user_query}, timeout=10.0
                     )
                     if resp.status_code == 200:
-                        sanitized_query = resp.json().get(
-                            "sanitized_query", req.user_query
-                        )
+                        gk_data = resp.json()
+                        if gk_data.get("status") == "blocked":
+                            gatekeeper_blocked = True
+                            gatekeeper_reason = gk_data.get("reason", "Query blocked by security policy.")
+                        else:
+                            sanitized_query = gk_data.get(
+                                "sanitized_query", req.user_query
+                            )
             except Exception as e:
                 logging.warning(
                     f"Gatekeeper call failed: {e}. Falling back to raw query."
                 )
+
+        # If gatekeeper blocked the query, return immediately
+        if gatekeeper_blocked:
+            return ChatResponse(
+                status="blocked",
+                output=f"Query blocked: {gatekeeper_reason}",
+                session_id=req.session_id,
+            )
 
         # Call SQL Engine
         sql_query = "SELECT * FROM orders LIMIT 5;"
@@ -97,7 +124,7 @@ async def chat(req: ChatRequest):
             try:
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
-                        sql_engine_url, json={"query": sanitized_query}, timeout=5.0
+                        sql_engine_url, json={"query": sanitized_query}, timeout=60.0
                     )
                     if resp.status_code == 200:
                         sql_query = resp.json().get("sql_query", sql_query)

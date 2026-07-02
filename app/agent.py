@@ -2,6 +2,11 @@ import logging
 import os
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+load_dotenv()
+
 import httpx
 import sqlparse
 from google.adk.agents import LlmAgent
@@ -99,7 +104,7 @@ def validate_query(ctx: Context, node_input: str) -> Event:
         )
         return Event(output=node_input)
     try:
-        resp = httpx.post(url, json={"query": node_input}, timeout=5.0)
+        resp = httpx.post(url, json={"query": node_input}, timeout=10.0)
         resp.raise_for_status()
         data = resp.json()
         sanitized = data.get("sanitized_query", node_input)
@@ -131,7 +136,7 @@ def generate_sql(ctx: Context, node_input: str) -> Event:
             actions=EventActions(state_delta={"sql_query": placeholder}),
         )
     try:
-        resp = httpx.post(url, json={"query": node_input}, timeout=5.0)
+        resp = httpx.post(url, json={"query": node_input}, timeout=60.0)
         resp.raise_for_status()
         data = resp.json()
         sql = data.get("sql_query", "SELECT * FROM orders LIMIT 5;")
