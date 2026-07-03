@@ -117,12 +117,20 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     margin-bottom: 20px;
 }
 .sb-brand-name {
-    font-size: 1.15rem;
+    font-size: 1.35rem;
     font-weight: 800;
     color: #E4572E !important;
     letter-spacing: -0.3px;
     display: block;
     line-height: 1.2;
+}
+.sb-brand-sub {
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: #64748B !important;
+    display: block;
+    margin-top: 6px;
+    line-height: 1.4;
 }
 .sb-brand-version {
     font-size: 0.68rem;
@@ -199,7 +207,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 1.35rem;
+    font-size: 1.55rem;
     font-weight: 800;
     color: #E4572E;
     letter-spacing: -0.5px;
@@ -537,12 +545,37 @@ div[data-testid="stForm"] button:active { transform: scale(0.98) !important; }
     padding: 24px !important;
 }
 
-/* ─── DataFrame ────────────────────────────────────────────────────────── */
+/* ─── DataFrame (HuggingFace-style compact columns) ────────────────────── */
 [data-testid="stDataFrame"] {
     background: #0F172A !important;
     border: 1px solid #334155 !important;
     border-radius: 10px !important;
     overflow: hidden !important;
+}
+/* Auto-fit column widths to content */
+[data-testid="stDataFrame"] table { table-layout: auto !important; }
+[data-testid="stDataFrame"] th {
+    white-space: nowrap !important;
+    font-size: 0.72rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.06em !important;
+    text-transform: uppercase !important;
+    color: #64748B !important;
+    background: #1E293B !important;
+    padding: 10px 14px !important;
+    border-bottom: 1px solid #334155 !important;
+}
+[data-testid="stDataFrame"] td {
+    white-space: nowrap !important;
+    padding: 8px 14px !important;
+    font-size: 0.85rem !important;
+    color: #F1F5F9 !important;
+    border-bottom: 1px solid #1E293B !important;
+}
+/* Glide data grid (Streamlit's internal) — fit to content */
+[data-testid="stDataFrame"] [data-testid="glideDataEditor"],
+[data-testid="stDataFrame"] canvas {
+    min-width: 0 !important;
 }
 
 /* ─── Code Blocks (global) ─────────────────────────────────────────────── */
@@ -1098,6 +1131,7 @@ with st.sidebar:
     st.markdown(
         '<div class="sb-brand">'
         '<span class="sb-brand-name">\u2756 QuerySage</span>'
+        '<span class="sb-brand-sub">Natural language analytics for your e-commerce data</span>'
         '<span class="sb-brand-version">v1.0 \u00b7 Canvas Edition</span>'
         '</div>',
         unsafe_allow_html=True,
@@ -1133,31 +1167,33 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    _services = {
-        "Orchestrator": f"{MASTER_URL}/health",
-        "Gatekeeper":   f"{GATEKEEPER_URL}/health",
-        "SQL Engine":   f"{SQL_ENGINE_URL}/health",
-    }
-    for _svc_name, _svc_url in _services.items():
-        try:
-            _r = httpx.get(_svc_url, headers=_get_auth_headers(_svc_url), timeout=2.0)
-            if _r.status_code == 200:
-                _dot_color  = "#16A34A"
-                _svc_status = "online"
-            else:
-                _dot_color  = "#F59E0B"
-                _svc_status = f"degraded ({_r.status_code})"
-        except Exception:
-            _dot_color  = "#DC2626"
-            _svc_status = "offline"
+    # Only check the main orchestrator \u2014 business users just need green/red
+    try:
+        _r = httpx.get(
+            f"{MASTER_URL}/health",
+            headers=_get_auth_headers(MASTER_URL),
+            timeout=2.0,
+        )
+        _all_ok = _r.status_code == 200
+    except Exception:
+        _all_ok = False
 
+    if _all_ok:
         st.markdown(
-            f'<div class="sb-health-row">'
-            f'<span class="sb-health-dot" style="background:{_dot_color};'
-            f'box-shadow:0 0 5px {_dot_color}66;"></span>'
-            f'<span class="sb-health-name">{_svc_name}'
-            f'<span style="color:#334155;font-size:0.7rem;"> \u00b7 {_svc_status}</span>'
-            f'</span></div>',
+            '<div class="sb-health-row" style="gap:10px;">'
+            '<span class="sb-health-dot" style="background:#16A34A;'
+            'box-shadow:0 0 6px #16A34A66;width:9px;height:9px;"></span>'
+            '<span class="sb-health-name" style="color:#94A3B8;font-size:0.85rem;">'
+            'Connected &amp; Ready</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="sb-health-row" style="gap:10px;">'
+            '<span class="sb-health-dot" style="background:#DC2626;'
+            'box-shadow:0 0 6px #DC262666;width:9px;height:9px;"></span>'
+            '<span class="sb-health-name" style="color:#94A3B8;font-size:0.85rem;">'
+            'Service Unavailable</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -1368,15 +1404,27 @@ if st.session_state.current_results is not None:
     # ── TAB 1: ResultSet ──────────────────────────────────────────────────────
     with tab_results:
         if df_display is not None and not df_display.empty:
-            _col_cfg = {
-                c: st.column_config.NumberColumn(format="%g")
-                for c in df_display.select_dtypes(include=["number"]).columns
-            }
+            # Build column config with widths sized to content
+            _col_cfg = {}
+            for c in df_display.columns:
+                # Estimate width: max of header length and longest value
+                _max_len = max(
+                    len(str(c)),
+                    df_display[c].astype(str).str.len().max() if len(df_display) > 0 else 0,
+                )
+                _width = max(80, min(400, _max_len * 10 + 40))
+                if c in df_display.select_dtypes(include=["number"]).columns:
+                    _col_cfg[c] = st.column_config.NumberColumn(
+                        format="%g", width=_width,
+                    )
+                else:
+                    _col_cfg[c] = st.column_config.TextColumn(width=_width)
+
             st.dataframe(
                 df_display,
-                use_container_width=True,
-                height=420,
-                column_config=_col_cfg if _col_cfg else None,
+                use_container_width=False,
+                height=min(420, 38 + len(df_display) * 36),
+                column_config=_col_cfg,
             )
         else:
             st.info("Query ran successfully but returned no rows.")
