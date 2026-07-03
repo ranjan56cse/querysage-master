@@ -1,3 +1,4 @@
+import os
 import re
 import uuid
 
@@ -5,6 +6,26 @@ import httpx
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+
+# Configurable service URLs (Cloud Run or localhost)
+MASTER_URL = os.environ.get("MASTER_URL", "http://localhost:8000")
+GATEKEEPER_URL = os.environ.get("GATEKEEPER_URL", "http://localhost:9000")
+SQL_ENGINE_URL = os.environ.get("SQL_ENGINE_URL", "http://localhost:9001")
+
+
+def _get_auth_headers(url: str) -> dict:
+    """Get Google Cloud auth headers if calling Agent Runtime endpoint."""
+    if "aiplatform.googleapis.com" not in url:
+        return {}
+    try:
+        import google.auth
+        import google.auth.transport.requests
+
+        credentials, _ = google.auth.default()
+        credentials.refresh(google.auth.transport.requests.Request())
+        return {"Authorization": f"Bearer {credentials.token}"}
+    except Exception:
+        return {}
 
 # Set page config for a widescreen BI experience
 st.set_page_config(
@@ -162,14 +183,15 @@ with st.sidebar:
 
     st.markdown("### Services Status")
     services_list = {
-        "Orchestrator": "http://localhost:8000/health",
-        "Gatekeeper": "http://localhost:9000/health",
-        "SQL Engine": "http://localhost:9001/health",
+        "Orchestrator": f"{MASTER_URL}/health",
+        "Gatekeeper": f"{GATEKEEPER_URL}/health",
+        "SQL Engine": f"{SQL_ENGINE_URL}/health",
     }
 
     for name, url in services_list.items():
         try:
-            resp = httpx.get(url, timeout=2.0)
+            headers = _get_auth_headers(url)
+            resp = httpx.get(url, headers=headers, timeout=2.0)
             if resp.status_code == 200:
                 st.success(f"{name} online")
             else:
@@ -200,7 +222,11 @@ def submit_query(query_text: str):
                 "user_id": st.session_state.user_id,
                 "user_query": query_text,
             }
-            resp = httpx.post("http://localhost:8000/chat", json=payload, timeout=90.0)
+            headers = _get_auth_headers(MASTER_URL)
+            resp = httpx.post(
+                f"{MASTER_URL}/chat", json=payload,
+                headers=headers, timeout=90.0,
+            )
 
             if resp.status_code == 200:
                 data = resp.json()

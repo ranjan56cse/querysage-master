@@ -13,6 +13,27 @@ load_dotenv()
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+# Google Cloud auth for Agent Runtime inter-service calls
+_auth_token_cache: dict = {}
+
+
+async def _get_auth_headers() -> dict:
+    """Get Google Cloud auth headers for Agent Runtime API calls."""
+    try:
+        import google.auth
+        import google.auth.transport.requests
+
+        credentials, _ = google.auth.default()
+        credentials.refresh(google.auth.transport.requests.Request())
+        return {"Authorization": f"Bearer {credentials.token}"}
+    except Exception:
+        return {}
+
+
+def _needs_auth(url: str) -> bool:
+    """Check if the URL is an Agent Runtime endpoint needing auth."""
+    return "aiplatform.googleapis.com" in (url or "")
 from google.adk.runners import Runner
 from google.genai import types
 from pydantic import BaseModel
@@ -135,9 +156,11 @@ async def chat(req: ChatRequest):
         gatekeeper_reason = None
         if gatekeeper_url and "YOUR_GATEKEEPER_SERVICE_URL" not in gatekeeper_url:
             try:
+                headers = await _get_auth_headers() if _needs_auth(gatekeeper_url) else {}
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
-                        gatekeeper_url, json={"query": req.user_query}, timeout=10.0
+                        gatekeeper_url, json={"query": req.user_query},
+                        headers=headers, timeout=10.0,
                     )
                     if resp.status_code == 200:
                         gk_data = resp.json()
@@ -167,9 +190,11 @@ async def chat(req: ChatRequest):
         sql_query = "SELECT * FROM orders LIMIT 5;"
         if sql_engine_url and "YOUR_SQL_ENGINE_SERVICE_URL" not in sql_engine_url:
             try:
+                headers = await _get_auth_headers() if _needs_auth(sql_engine_url) else {}
                 async with httpx.AsyncClient() as client:
                     resp = await client.post(
-                        sql_engine_url, json={"query": sanitized_query}, timeout=60.0
+                        sql_engine_url, json={"query": sanitized_query},
+                        headers=headers, timeout=60.0,
                     )
                     if resp.status_code == 200:
                         sql_query = resp.json().get("sql_query", sql_query)
