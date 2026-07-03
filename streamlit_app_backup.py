@@ -835,7 +835,6 @@ _defaults = {
     "follow_up_suggestions": [],
     "schema_verification":   None,
     "insight_data":          None,
-    "last_error":            None,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
@@ -880,22 +879,18 @@ def submit_query(query_text: str):
         # Target response storage
         result_holder = {}
 
-        # Capture values BEFORE spawning the thread (threads can't access st.session_state)
-        _sid = st.session_state.session_id
-        _uid = st.session_state.user_id
-        _headers = _get_auth_headers(MASTER_URL)
-
         def make_request():
             try:
                 payload = {
-                    "session_id": _sid,
-                    "user_id":    _uid,
+                    "session_id": st.session_state.session_id,
+                    "user_id":    st.session_state.user_id,
                     "user_query": query_text,
                 }
+                headers = _get_auth_headers(MASTER_URL)
                 resp = httpx.post(
                     f"{MASTER_URL}/chat",
                     json=payload,
-                    headers=_headers,
+                    headers=headers,
                     timeout=90.0,
                 )
                 result_holder["resp"] = resp
@@ -979,9 +974,8 @@ def submit_query(query_text: str):
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Process response
-    st.session_state.last_error = None
     if "error" in result_holder:
-        st.session_state.last_error = f"Failed to reach Orchestrator: {result_holder['error']}"
+        st.error(f"Failed to reach Orchestrator: {result_holder['error']}")
     elif "resp" in result_holder:
         resp = result_holder["resp"]
         if resp.status_code == 200:
@@ -1088,7 +1082,7 @@ def submit_query(query_text: str):
                 st.session_state.insight_data        = None
 
         else:
-            st.session_state.last_error = f"Endpoint error {resp.status_code}: {resp.text}"
+            st.error(f"Endpoint error {resp.status_code}: {resp.text}")
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
@@ -1110,6 +1104,7 @@ with st.sidebar:
     )
     st.text_input(
         "User ID",
+        value=st.session_state.user_id,
         key="user_id",
         label_visibility="visible",
     )
@@ -1536,11 +1531,7 @@ if st.session_state.current_results is not None:
                         st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ── Persistent Error Display ──────────────────────────────────────────────────
-if st.session_state.get("last_error"):
-    st.error(st.session_state.last_error)
-
-if st.session_state.current_results is None and not st.session_state.get("last_error"):
+else:
     st.markdown(
         """
 <div class="qs-empty">

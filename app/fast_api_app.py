@@ -75,6 +75,9 @@ class ChatResponse(BaseModel):
     session_id: str
     sql_results: list[dict[str, Any]] | None = None
     chart_type: str | None = None
+    follow_up_suggestions: list[str] | None = None
+    insight_data: dict[str, Any] | None = None
+    schema_verification: dict[str, Any] | None = None
 
 
 @app.get("/health")
@@ -268,6 +271,9 @@ async def chat(req: ChatRequest):
     # 5. Extract structured results from session state for charts
     sql_results = None
     chart_type = None
+    follow_up_suggestions = None
+    insight_data = None
+    schema_verification = None
     try:
         updated_session = await session_service.get_session(
             app_name="app", user_id=req.user_id, session_id=req.session_id
@@ -277,6 +283,11 @@ async def chat(req: ChatRequest):
             if isinstance(executor_output, dict):
                 sql_results = executor_output.get("sql_results")
                 chart_type = executor_output.get("chart_type", "table")
+            insight_output = updated_session.state.get("insight_output", {})
+            if isinstance(insight_output, dict):
+                follow_up_suggestions = insight_output.get("follow_up_questions", [])
+                insight_data = {"insights": insight_output.get("insights", ""), "follow_up_questions": follow_up_suggestions}
+            schema_verification = updated_session.state.get("schema_verification")
     except Exception as e:
         logging.warning(f"Could not extract structured results: {e}")
 
@@ -286,4 +297,7 @@ async def chat(req: ChatRequest):
         session_id=req.session_id,
         sql_results=sql_results,
         chart_type=chart_type,
+        follow_up_suggestions=follow_up_suggestions,
+        insight_data=insight_data,
+        schema_verification=schema_verification,
     )

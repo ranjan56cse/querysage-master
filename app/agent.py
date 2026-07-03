@@ -63,6 +63,7 @@ class QuerySageState(BaseModel):
     insights: str | None = None
     executor_output: dict[str, Any] | None = None
     insight_output: dict[str, Any] | None = None
+    schema_verification: dict[str, Any] | None = None
 
 
 class ExecutorOutput(BaseModel):
@@ -74,6 +75,36 @@ class ExecutorOutput(BaseModel):
 class InsightOutput(BaseModel):
     insights: str
     follow_up_questions: list[str]
+
+
+class SchemaVerification(BaseModel):
+    is_ambiguous: bool = False
+    original_query: str = ""
+    corrected_query: str | None = None
+    explanation: str | None = None
+    alternatives: list[str] | None = None
+
+
+schema_verifier = LlmAgent(
+    name="schema_verifier",
+    model="gemini-2.5-flash",
+    instruction=(
+        "You are a database schema expert. The user asked a business question in natural language. "
+        "Your job is to verify whether the user's question maps correctly to the database schema. "
+        "The database is a Neon Postgres e-commerce database with tables: orders, products, customers, order_items, categories. "
+        "Key columns include: order_id, customer_id, product_id, order_date, total_amount, quantity, unit_price, product_name, category_name, customer_name, email, city, country. "
+        "\n\nCheck for:\n"
+        "- Typos in table/column names (e.g., 'revenu' should be 'total_amount' or 'revenue')\n"
+        "- Ambiguous terms that could map to multiple columns (e.g., 'sales' could mean total_amount or quantity)\n"
+        "- References to tables/columns that don't exist\n"
+        "\nIf the query is clear and maps well to the schema, set is_ambiguous=False and corrected_query=None.\n"
+        "If the query has issues, set is_ambiguous=True, provide a corrected_query with the improved phrasing, "
+        "an explanation of what was ambiguous, and alternatives if applicable.\n"
+        "Always set original_query to the input query text."
+    ),
+    output_schema=SchemaVerification,
+    output_key="schema_verification",
+)
 
 
 # Define nodes
@@ -120,6 +151,29 @@ def validate_query(ctx: Context, node_input: str) -> Event:
             f"Failed to call Gatekeeper service: {e}. Passing query through unchanged."
         )
         return Event(output=node_input)
+
+
+@node
+def schema_route(ctx: Context, node_input: dict) -> Event:
+    """Routes based on whether the query was ambiguous."""
+    is_ambiguous = node_input.get("is_ambiguous", False)
+    if is_ambiguous:
+        corrected = node_input.get("corrected_query", "")
+        if corrected:
+            return Event(
+                output=corrected,
+                actions=EventActions(
+                    state_delta={"sanitized_query": corrected, "schema_verification": node_input},
+                    route="corrected"
+                ),
+            )
+    return Event(
+        output=ctx.state.get("sanitized_query", ""),
+        actions=EventActions(
+            state_delta={"schema_verification": node_input},
+            route="clear"
+        ),
+    )
 
 
 @node
@@ -362,7 +416,7 @@ root_agent = Workflow(
     state_schema=QuerySageState,
     edges=[
         *Edge.chain(
-            [START, receive_query, validate_query, generate_sql, security_checkpoint]
+            [START, receive_query, validate_query, schema_verifier, schema_route, generate_sql, security_checkpoint]
         ),
         (security_checkpoint, {"valid": approve_sql, "invalid": reject_query}),
         (approve_sql, {"approved": executor, "rejected": reject_query}),
