@@ -168,12 +168,10 @@ button[data-testid="stBaseButton-secondary"]:hover{border-color:#DC2626!importan
 .chart-card-badge.ranking{color:#E4572E;background:#FBEAE4}
 .chart-card-badge.proportion{color:#0EA5E9;background:#E4F4FC}
 
-/* ─── Insight Sidebar (dark) ─────────────────────────────────────── */
-.insight-sidebar{background:#1E293B;border-radius:16px;padding:20px 18px;min-height:320px}
-.insight-sidebar-title{font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:#94A3B8;margin-bottom:16px}
-.insight-side-card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px 16px;margin-bottom:10px}
-.insight-side-label{font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:5px}
-.insight-side-text{font-size:13px;color:#CBD5E1;line-height:1.55}
+/* ─── Insight Cards (light, full-width) ──────────────────────────── */
+.insight-card{background:#FFF;border:1px solid #EEEAE0;border-radius:14px;padding:18px 24px;margin-bottom:12px}
+.insight-label{font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px}
+.insight-text{font-size:13.5px;color:#6B6252;line-height:1.55}
 
 /* ─── Empty State ────────────────────────────────────────────────── */
 .qs-empty{text-align:center;padding:80px 24px;max-width:480px;margin:0 auto}
@@ -524,7 +522,7 @@ if _current_sql:
         st.code(_current_sql, language="sql")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ── Results — Two-Column Layout: Tabs + Insight Sidebar ──────────────────────
+# ── Results — Three Tabs: ResultSet | Visualization | Insights ───────────────
 if st.session_state.current_results is not None:
     try:
         df_display = pd.DataFrame(st.session_state.current_results)
@@ -533,70 +531,67 @@ if st.session_state.current_results is not None:
 
     st.markdown('<div class="qs-section">', unsafe_allow_html=True)
 
-    # Two-column: main content (tabs) + insight sidebar
-    col_main, col_insight = st.columns([7, 3], gap="medium")
+    tab_results, tab_viz, tab_insights = st.tabs(["ResultSet", "Visualization", "Insights"])
 
-    # ── LEFT: Tabs ───────────────────────────────────────────────────────────
-    with col_main:
-        tab_results, tab_viz = st.tabs(["ResultSet", "Visualization"])
+    # ── TAB 1: ResultSet ─────────────────────────────────────────────────────
+    with tab_results:
+        if df_display is not None and not df_display.empty:
+            import html as _html_mod
+            _num_cols = set(df_display.select_dtypes(include=["number"]).columns)
 
-        # ── TAB 1: ResultSet ─────────────────────────────────────────────────
-        with tab_results:
-            if df_display is not None and not df_display.empty:
-                import html as _html_mod
-                _num_cols = set(df_display.select_dtypes(include=["number"]).columns)
+            _thead = "<tr>"
+            for c in df_display.columns:
+                _cls = ' class="num-col"' if c in _num_cols else ""
+                _thead += f"<th{_cls}>{_html_mod.escape(str(c).upper())}</th>"
+            _thead += "</tr>"
 
-                _thead = "<tr>"
+            _tbody = ""
+            for _, row in df_display.iterrows():
+                _tbody += "<tr>"
                 for c in df_display.columns:
-                    _cls = ' class="num-col"' if c in _num_cols else ""
-                    _thead += f"<th{_cls}>{_html_mod.escape(str(c).upper())}</th>"
-                _thead += "</tr>"
+                    val = row[c]
+                    if c in _num_cols:
+                        try:
+                            _fmt = f"${val:,.0f}" if abs(val) >= 100 else f"{val:g}"
+                        except Exception:
+                            _fmt = str(val)
+                        _tbody += f'<td class="num-col">{_html_mod.escape(_fmt)}</td>'
+                    else:
+                        _tbody += f'<td class="name-col">{_html_mod.escape(str(val))}</td>'
+                _tbody += "</tr>"
 
-                _tbody = ""
-                for _, row in df_display.iterrows():
-                    _tbody += "<tr>"
-                    for c in df_display.columns:
-                        val = row[c]
-                        if c in _num_cols:
-                            try:
-                                _fmt = f"${val:,.0f}" if abs(val) >= 100 else f"{val:g}"
-                            except Exception:
-                                _fmt = str(val)
-                            _tbody += f'<td class="num-col">{_html_mod.escape(_fmt)}</td>'
-                        else:
-                            _tbody += f'<td class="name-col">{_html_mod.escape(str(val))}</td>'
-                    _tbody += "</tr>"
+            st.markdown(
+                f'<table class="qs-result-table"><thead>{_thead}</thead><tbody>{_tbody}</tbody></table>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("Query ran successfully but returned no rows.")
 
-                st.markdown(
-                    f'<table class="qs-result-table"><thead>{_thead}</thead><tbody>{_tbody}</tbody></table>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.info("Query ran successfully but returned no rows.")
+    # ── TAB 2: Visualization (bar + pie side by side) ────────────────────────
+    with tab_viz:
+        if df_display is not None and not df_display.empty:
+            _num_cols_list = df_display.select_dtypes(include=["number"]).columns.tolist()
+            _cat_cols_list = df_display.select_dtypes(exclude=["number"]).columns.tolist()
 
-        # ── TAB 2: Visualization ─────────────────────────────────────────────
-        with tab_viz:
-            if df_display is not None and not df_display.empty:
-                _num_cols_list = df_display.select_dtypes(include=["number"]).columns.tolist()
-                _cat_cols_list = df_display.select_dtypes(exclude=["number"]).columns.tolist()
+            _light = dict(
+                template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#6B6252", family="Inter, sans-serif"),
+                title_font=dict(color="#241F1A", size=14, family="Inter, sans-serif"),
+                legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6B6252")),
+                margin=dict(l=32, r=32, t=48, b=36),
+            )
+            _pie_palette = ["#E4572E", "#0EA5E9", "#8FCC00", "#B18CFF", "#F2A65A"]
 
-                _light = dict(
-                    template="plotly_white", paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#6B6252", family="Inter, sans-serif"),
-                    title_font=dict(color="#241F1A", size=14, family="Inter, sans-serif"),
-                    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#6B6252")),
-                    margin=dict(l=32, r=32, t=48, b=36),
-                )
-                _pie_palette = ["#E4572E", "#0EA5E9", "#8FCC00", "#B18CFF", "#F2A65A"]
+            if _cat_cols_list and _num_cols_list:
+                _cat, _num = _cat_cols_list[0], _num_cols_list[0]
+                _n = len(df_display)
+                _bar_clrs = ["#8FCC00"] + ["rgba(14,165,233,0.55)"] * max(0, _n - 1)
+                _col_bar, _col_pie = st.columns(2, gap="medium")
 
-                if _cat_cols_list and _num_cols_list:
-                    _cat, _num = _cat_cols_list[0], _num_cols_list[0]
-                    _n = len(df_display)
-                    _bar_clrs = ["#8FCC00"] + ["rgba(14,165,233,0.55)"] * max(0, _n - 1)
-
+                with _col_bar:
                     st.markdown(
                         '<div class="chart-card"><div class="chart-card-header">'
-                        '<span class="chart-card-label">Auto-selected visualization</span>'
+                        '<span class="chart-card-label">Bar chart</span>'
                         '<span class="chart-card-badge ranking">best for ranking</span>'
                         '</div>', unsafe_allow_html=True)
                     _fig_bar = px.bar(df_display, x=_cat, y=_num, title=f"{_num} by {_cat}")
@@ -605,6 +600,7 @@ if st.session_state.current_results is not None:
                     st.plotly_chart(_fig_bar, use_container_width=True, key="tab_bar")
                     st.markdown("</div>", unsafe_allow_html=True)
 
+                with _col_pie:
                     st.markdown(
                         '<div class="chart-card"><div class="chart-card-header">'
                         '<span class="chart-card-label">Share of total</span>'
@@ -617,73 +613,52 @@ if st.session_state.current_results is not None:
                     st.plotly_chart(_fig_pie, use_container_width=True, key="tab_pie")
                     st.markdown("</div>", unsafe_allow_html=True)
 
-                elif _num_cols_list:
-                    _num = _num_cols_list[0]
-                    _n = len(df_display)
-                    _bar_clrs = ["#8FCC00"] + ["rgba(14,165,233,0.55)"] * max(0, _n - 1)
-                    st.markdown(
-                        '<div class="chart-card"><div class="chart-card-header">'
-                        '<span class="chart-card-label">Distribution</span></div>',
-                        unsafe_allow_html=True)
-                    _fig = px.bar(df_display, x=df_display.index, y=_num, title=f"Distribution of {_num}")
-                    _fig.update_traces(marker_color=_bar_clrs)
-                    _fig.update_layout(**_light)
-                    st.plotly_chart(_fig, use_container_width=True, key="tab_dist")
-                    st.markdown("</div>", unsafe_allow_html=True)
-                else:
-                    st.info("Data doesn't contain numeric values for charting.")
+            elif _num_cols_list:
+                _num = _num_cols_list[0]
+                _n = len(df_display)
+                _bar_clrs = ["#8FCC00"] + ["rgba(14,165,233,0.55)"] * max(0, _n - 1)
+                st.markdown(
+                    '<div class="chart-card"><div class="chart-card-header">'
+                    '<span class="chart-card-label">Distribution</span></div>',
+                    unsafe_allow_html=True)
+                _fig = px.bar(df_display, x=df_display.index, y=_num, title=f"Distribution of {_num}")
+                _fig.update_traces(marker_color=_bar_clrs)
+                _fig.update_layout(**_light)
+                st.plotly_chart(_fig, use_container_width=True, key="tab_dist")
+                st.markdown("</div>", unsafe_allow_html=True)
             else:
-                st.info("No data to chart yet — run a query first.")
+                st.info("Data doesn't contain numeric values for charting.")
+        else:
+            st.info("No data to chart yet — run a query first.")
 
-    # ── RIGHT: Agent Insights Sidebar ────────────────────────────────────────
-    with col_insight:
+    # ── TAB 3: Insights (full-width cards) ───────────────────────────────────
+    with tab_insights:
         _idata       = st.session_state.get("insight_data") or {}
         _anomaly     = _idata.get("anomaly", "").strip()
         _trend       = _idata.get("trend", "").strip()
         _correlation = _idata.get("correlation", "").strip()
         _raw_insight = _idata.get("insights", "").strip()
 
-        _cards_html = ""
+        def _render_insight_card(label: str, color: str, text: str):
+            st.markdown(
+                f'<div class="insight-card">'
+                f'<div class="insight-label" style="color:{color};">{label}</div>'
+                f'<div class="insight-text">{text}</div></div>',
+                unsafe_allow_html=True,
+            )
 
+        _any = False
         if _anomaly:
-            _cards_html += (
-                '<div class="insight-side-card">'
-                '<div class="insight-side-label" style="color:#F87171;">Anomaly Detection</div>'
-                f'<div class="insight-side-text">{_anomaly}</div></div>'
-            )
+            _render_insight_card("Anomaly", "#E4572E", _anomaly); _any = True
         if _trend:
-            _cards_html += (
-                '<div class="insight-side-card">'
-                '<div class="insight-side-label" style="color:#38BDF8;">Trend Analysis</div>'
-                f'<div class="insight-side-text">{_trend}</div></div>'
-            )
+            _render_insight_card("Trend", "#0EA5E9", _trend); _any = True
         if _correlation:
-            _cards_html += (
-                '<div class="insight-side-card">'
-                '<div class="insight-side-label" style="color:#A3E635;">Correlation Discovery</div>'
-                f'<div class="insight-side-text">{_correlation}</div></div>'
-            )
-
-        if not _cards_html and _raw_insight:
-            _cards_html = (
-                '<div class="insight-side-card">'
-                '<div class="insight-side-label" style="color:#94A3B8;">Agent Insights</div>'
-                f'<div class="insight-side-text">{_raw_insight}</div></div>'
-            )
-
-        if not _cards_html:
-            _cards_html = (
-                '<div class="insight-side-card">'
-                '<div class="insight-side-text" style="color:#64748B;">Insights will appear here after results are returned.</div></div>'
-            )
-
-        st.markdown(
-            f'<div class="insight-sidebar">'
-            f'<div class="insight-sidebar-title">Agent Insights</div>'
-            f'{_cards_html}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+            _render_insight_card("Correlation", "#8FCC00", _correlation); _any = True
+        if not _any:
+            if _raw_insight:
+                _render_insight_card("Insights", "#6B6252", _raw_insight)
+            else:
+                st.info("Insights will appear here after a query runs with results.")
 
     st.markdown("</div>", unsafe_allow_html=True)  # qs-section
 
