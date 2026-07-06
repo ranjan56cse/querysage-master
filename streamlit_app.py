@@ -108,7 +108,7 @@ section[data-testid="stSidebar"],button[data-testid="stSidebarCollapsedControl"]
 .qs-db-badge{font-size:12px;font-weight:500;color:var(--text2);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-pill);padding:6px 14px}
 
 /* ═══ Hero Search ════════════════════════════════════════════════════ */
-.qs-hero{max-width:var(--max-w);margin:0 auto;padding:32px 40px 0}
+.qs-hero{max-width:var(--max-w);margin:0 auto;padding:32px 0 0}
 div[data-testid="stForm"]{
     background:var(--surface)!important;
     border:1.5px solid var(--border)!important;
@@ -116,6 +116,7 @@ div[data-testid="stForm"]{
     padding:8px 8px 8px 24px!important;
     box-shadow:var(--shadow-md)!important;
     transition:border-color var(--transition),box-shadow var(--transition)!important;
+    max-width:var(--max-w)!important;margin-left:auto!important;margin-right:auto!important;
 }
 div[data-testid="stForm"]:focus-within{
     border-color:var(--accent)!important;
@@ -150,7 +151,7 @@ div[data-testid="stForm"] button[kind="formSubmit"]:hover{
 }
 
 /* ═══ Content Area ═══════════════════════════════════════════════════ */
-.qs-content{max-width:var(--max-w);margin:0 auto;padding:0 40px}
+.qs-content{max-width:var(--max-w);margin:0 auto}
 
 /* ═══ HITL Card ══════════════════════════════════════════════════════ */
 .hitl-card{
@@ -320,6 +321,10 @@ button[data-testid="stBaseButton-secondary"]:hover{border-color:#DC2626!importan
 .insight-card.generic{border-left-color:var(--text3)}
 .insight-label{font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;margin-bottom:8px}
 .insight-text{font-size:14px;color:var(--text2);line-height:1.65}
+.insight-list{list-style:none;padding:0;margin:6px 0 0}
+.insight-list li{position:relative;padding:8px 0 8px 20px;font-size:14px;color:var(--text2);line-height:1.65}
+.insight-list li+li{border-top:1px solid var(--border)}
+.insight-list li::before{content:'';position:absolute;left:0;top:16px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 
 /* ═══ Schema Ambiguity ═══════════════════════════════════════════════ */
 .sv-card{
@@ -347,9 +352,10 @@ button[data-testid="stBaseButton-secondary"]:hover{border-color:#DC2626!importan
 [data-testid="stSpinner"]>div:first-child{border-top-color:var(--accent)!important;border-right-color:var(--accent)!important;border-bottom-color:rgba(228,87,46,0.15)!important;border-left-color:rgba(228,87,46,0.15)!important}
 [data-testid="stSpinner"] p{color:var(--text2)!important;font-size:0.9rem!important;font-weight:500!important}
 .qs-loader{
-    max-width:var(--max-w);margin:20px auto;padding:18px 28px;
+    width:100%;margin:20px 0;padding:18px 28px;
     background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
     display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-sm);
+    box-sizing:border-box;
 }
 @keyframes qs-pulse{0%,80%,100%{opacity:0.15;transform:scale(0.7)}40%{opacity:1;transform:scale(1)}}
 .qs-dots{display:flex;gap:5px;align-items:center}
@@ -363,6 +369,11 @@ button[data-testid="stBaseButton-secondary"]:hover{border-color:#DC2626!importan
 .stCodeBlock code{color:#7DD3FC!important}
 hr{border-color:var(--border)!important;margin:20px 0!important}
 div[data-testid="stNotification"]{background:var(--surface)!important;border-left-color:var(--border)!important;color:var(--text)!important;border-radius:var(--radius-sm)!important}
+
+/* ═══ Uniform Width ═════════════════════════════════════════════════ */
+[data-testid="stExpander"]{max-width:var(--max-w)!important;margin-left:auto!important;margin-right:auto!important}
+[data-testid="stTabs"]{max-width:var(--max-w)!important;margin-left:auto!important;margin-right:auto!important}
+[data-testid="stHorizontalBlock"]{max-width:var(--max-w)!important;margin-left:auto!important;margin-right:auto!important}
 
 /* ═══ Animations ═════════════════════════════════════════════════════ */
 @keyframes qs-rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
@@ -453,8 +464,10 @@ def submit_query(query_text: str):
                     try: st.session_state.current_sql = output.split("```sql")[1].split("```")[0].strip()
                     except Exception: pass
                 if not st.session_state.current_sql:
-                    _dsql = data.get("sql") or data.get("generated_sql") or ""
+                    _dsql = data.get("sql") or data.get("generated_sql") or data.get("query") or data.get("executed_sql") or ""
                     if _dsql: st.session_state.current_sql = _clean_sql_text(_dsql)
+                if not st.session_state.current_sql and st.session_state.get("interrupted_sql"):
+                    st.session_state.current_sql = st.session_state.interrupted_sql
                 raw_insight = data.get("insight_data") or {}
                 if isinstance(raw_insight, dict) and raw_insight:
                     st.session_state.insight_data = {
@@ -611,8 +624,8 @@ if st.session_state.get("schema_confirmed") and st.session_state.get("last_query
 _current_sql = st.session_state.get("current_sql", "")
 if _current_sql:
     st.markdown('<div class="qs-content qs-sql-section">', unsafe_allow_html=True)
-    _badge = '<span class="sql-badge">Verified</span>' if st.session_state.get("schema_confirmed") else ""
-    with st.expander(f'<span class="sql-label">Generated SQL</span>{_badge}', expanded=False):
+    _badge_txt = "Generated SQL  ·  Verified" if st.session_state.get("schema_confirmed") else "Generated SQL"
+    with st.expander(_badge_txt, expanded=True):
         st.code(_current_sql, language="sql")
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -714,7 +727,13 @@ if st.session_state.current_results is not None:
             _any = True
         if not _any:
             if _raw_insight:
-                st.markdown(f'<div class="insight-card generic"><div class="insight-label" style="color:var(--text3)">Insights</div><div class="insight-text">{_raw_insight}</div></div>', unsafe_allow_html=True)
+                import html as _html_ins
+                _sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', _raw_insight) if len(s.strip()) > 15]
+                if _sentences:
+                    _bullets = "".join(f"<li>{_html_ins.escape(s)}</li>" for s in _sentences)
+                    st.markdown(f'<div class="insight-card generic"><div class="insight-label" style="color:var(--text3)">Insights</div><ul class="insight-list">{_bullets}</ul></div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="insight-card generic"><div class="insight-label" style="color:var(--text3)">Insights</div><div class="insight-text">{_raw_insight}</div></div>', unsafe_allow_html=True)
             else:
                 st.info("Insights will appear here after a query runs with results.")
 
